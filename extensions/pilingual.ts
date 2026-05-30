@@ -284,6 +284,7 @@ async function translateText(
   ctx: ExtensionContext,
   state: PilingualState,
 ): Promise<string | null> {
+  if (ctx.signal?.aborted) return null;
   if (PILINGUAL_MAX_CHARS > 0 && english.length > PILINGUAL_MAX_CHARS) {
     return null;
   }
@@ -308,6 +309,7 @@ async function translateText(
       `${registryModel.baseUrl}/chat/completions`,
       {
         method: "POST",
+        signal: ctx.signal,
         headers: {
           ...auth.headers,
           "Content-Type": "application/json",
@@ -375,10 +377,17 @@ export default function (pi: ExtensionAPI) {
     ctx.ui.notify(`Pilingual: ${state.enabled ? "on" : "off"}`, "info");
   });
 
+  // ── Serial translation queue ────────────────────────────────────────────
+  // Ensures translations render in the same order as their source messages,
+  // even when multiple translations are in-flight concurrently.
+
+  let translationQueue: Promise<void> = Promise.resolve();
+
   // ── Intercept assistant messages at message_end ─────────────────────────
 
   pi.on("message_end", async (event, ctx) => {
     if (!state.enabled) return;
+    if (ctx.signal?.aborted) return;
     if (event.message.role !== "assistant") return;
 
     // Extract text blocks for translation
@@ -390,35 +399,55 @@ export default function (pi: ExtensionAPI) {
     const englishText = textBlocks.map((b) => b.text).join("\n\n");
     if (!englishText.trim()) return;
 
-    // Translate (no abort signal — message_end runs post-stream)
-    const translatedText = await translateText(englishText, ctx, state);
-    if (!translatedText) return;
+    // Start translation immediately (concurrent), but serialize the send.
+    const translationPromise = translateText(englishText, ctx, state);
 
-    const sendRenderedMessage = () => {
-      pi.sendMessage(
-        {
-          customType: "pilingual",
-          content: "",
-          display: true,
-          details: {
-            english: englishText,
-            translated: translatedText,
-            targetLanguage: state.targetLanguage,
-          },
+    // Chain onto the queue so sends happen in message order.
+    translationQueue = translationQueue.then(async () => {
+      if (ctx.signal?.aborted) return;
+      const translatedText = await translationPromise;
+      if (ctx.signal?.aborted) return;
+      if (!translatedText) return;
+
+      // Wait for idle before sending to avoid rendering mid-stream.
+      await new Promise<void>((resolve, reject) => {
+        const onAbort = () => {
+          reject(new Error("Aborted"));
+        };
+        if (ctx.signal?.aborted) {
+          onAbort();
+          return;
+        }
+        ctx.signal?.addEventListener("abort", onAbort);
+        const poll = () => {
+          if (ctx.signal?.aborted) {
+            ctx.signal?.removeEventListener("abort", onAbort);
+            reject(new Error("Aborted"));
+            return;
+          }
+          if (ctx.isIdle()) {
+            ctx.signal?.removeEventListener("abort", onAbort);
+            resolve();
+            return;
+          }
+          setTimeout(poll, 50);
+        };
+        poll();
+      });
+
+      pi.sendMessage({
+        customType: "pilingual",
+        content: "",
+        display: true,
+        details: {
+          english: englishText,
+          translated: translatedText,
+          targetLanguage: state.targetLanguage,
         },
-      );
-    };
-
-    const sendWhenIdle = () => {
-      if (ctx.isIdle()) {
-        sendRenderedMessage();
-        return;
-      }
-
-      setTimeout(sendWhenIdle, 50);
-    };
-
-    setTimeout(sendWhenIdle, 0);
+      });
+    }).catch(() => {
+      // Don't let one failed translation break the chain.
+    });
 
     let insertedPilingualText = false;
     const content: typeof event.message.content = [];
