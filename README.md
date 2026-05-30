@@ -60,17 +60,6 @@ adapter Pilingual currently knows how to call.
 Running `/pilingual provider`, `/pilingual model`, or `/pilingual language` with
 no argument opens a TUI selector.
 
-For a manual fallback endpoint, set:
-
-```bash
-export PILINGUAL_ADAPTER=openai-compatible
-export PILINGUAL_API_KEY=...
-export PILINGUAL_BASE_URL=https://opencode.ai/zen/go/v1
-export PILINGUAL_MODEL=deepseek-v4-flash
-export PILINGUAL_TARGET_LANGUAGE=Spanish
-export PILINGUAL_MAX_CHARS=8000
-```
-
 Optionally set `PILINGUAL_PROVIDER=<pi-provider-id>` and `PILINGUAL_MODEL=<model-id>` to pick a pi registry model at startup.
 
 Set `PILINGUAL_MAX_CHARS=0` to disable the length limit.

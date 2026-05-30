@@ -42,15 +42,6 @@ Runtime env vars (optional):
 | `PILINGUAL_TARGET_LANGUAGE` | Target language (default: Spanish) |
 | `PILINGUAL_MAX_CHARS` | Skip translation above this length; 0 disables (default: 8000) |
 
-Manual fallback (optional):
-
-| Variable | Purpose |
-|----------|---------|
-| `PILINGUAL_ADAPTER` | `openai-compatible` |
-| `PILINGUAL_API_KEY` | API key for fallback endpoint |
-| `PILINGUAL_BASE_URL` | Base URL for fallback endpoint |
-| `PILINGUAL_MODEL` | Model ID for fallback endpoint |
-
 State is persisted to `<agent-dir>/pilingual.json`.
 
 ## Notes
