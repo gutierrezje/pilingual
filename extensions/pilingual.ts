@@ -169,13 +169,6 @@ function findModelFromArg(
   return models.find((model) => model.id === arg);
 }
 
-function parseNumberedSelection(value: string, max: number): number | undefined {
-  if (!/^\d+$/.test(value)) return undefined;
-
-  const index = Number(value) - 1;
-  return index >= 0 && index < max ? index : undefined;
-}
-
 function numberedOptions(values: string[]): string[] {
   return values.map((value, index) => `${index + 1}. ${value}`);
 }
@@ -237,11 +230,11 @@ function getUsageText(): string {
     "  /pilingual off",
     "  /pilingual status",
     "  /pilingual provider",
-    "  /pilingual provider <provider|number>",
+    "  /pilingual provider <provider>",
     "  /pilingual model",
-    "  /pilingual model <provider/model|model|number>",
+    "  /pilingual model <provider/model|model>",
     "  /pilingual language",
-    "  /pilingual language <language|number>",
+    "  /pilingual language <language>",
   ].join("\n");
 }
 
@@ -613,8 +606,7 @@ export default function (pi: ExtensionAPI) {
           return;
         }
 
-        const providerIndex = parseNumberedSelection(value, providers.length);
-        const providerName = providerIndex === undefined ? value : providers[providerIndex];
+        const providerName = value;
         const providerModels = getTranslationModels(ctx).filter(
           (model) => model.provider === providerName,
         );
@@ -666,11 +658,7 @@ export default function (pi: ExtensionAPI) {
         const candidateModels = getTranslationModels(ctx).filter((model) =>
           state.provider ? model.provider === state.provider : true,
         );
-        const modelIndex = parseNumberedSelection(value, candidateModels.length);
-        const model =
-          modelIndex === undefined
-            ? findModelFromArg(ctx, value, state.provider)
-            : candidateModels[modelIndex];
+        const model = findModelFromArg(ctx, value, state.provider);
         if (!model) {
           ctx.ui.notify(
             `No available OpenAI-compatible model matching "${value}".\n\nAvailable models${
@@ -699,22 +687,6 @@ export default function (pi: ExtensionAPI) {
           const selectedLanguage = await selectTargetLanguage(ctx);
           if (!selectedLanguage) return;
           language = selectedLanguage;
-        } else {
-          const languageIndex = parseNumberedSelection(
-            language,
-            COMMON_TARGET_LANGUAGES.length,
-          );
-          if (languageIndex !== undefined) {
-            language = COMMON_TARGET_LANGUAGES[languageIndex];
-            if (language === "Custom...") {
-              const customLanguage = await ctx.ui.input(
-                "Target language",
-                "e.g. Catalan, Arabic, Brazilian Portuguese",
-              );
-              if (!customLanguage?.trim()) return;
-              language = customLanguage.trim();
-            }
-          }
         }
 
         state.targetLanguage = language.replace(

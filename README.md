@@ -32,13 +32,10 @@ Then restart pi or run:
 /pilingual status
 /pilingual provider
 /pilingual provider <provider>
-/pilingual provider <number>
 /pilingual model
 /pilingual model <provider/model>
-/pilingual model <number>
 /pilingual language
 /pilingual language <language>
-/pilingual language <number>
 ```
 
 `/pilingual` with no arguments prints current status plus usage.
@@ -52,20 +49,16 @@ configured through pi can select one interactively:
 ```text
 /pilingual provider
 /pilingual provider openai
-/pilingual provider 1
 /pilingual model
 /pilingual model openai/gpt-4.1-mini
-/pilingual model 2
 /pilingual language
 /pilingual language French
-/pilingual language 1
 ```
 
 Only available `openai-completions` models are offered, because that is the
 adapter Pilingual currently knows how to call.
-Running `/pilingual provider` or `/pilingual model` with no argument opens a
-TUI selector. Numbered arguments select from the same filtered list shown in
-the selector.
+Running `/pilingual provider`, `/pilingual model`, or `/pilingual language` with
+no argument opens a TUI selector.
 
 For a manual fallback endpoint, set:
 
