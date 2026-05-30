@@ -72,16 +72,13 @@ function saveStateToFile(state: PilingualState): void {
 
 function languageCode(lang: string): string {
   const map: Record<string, string> = {
-    Spanish: "ES",
-    "Mexican Spanish": "ES-MX",
-    "Latin American Spanish": "ES-LATAM",
     "Spanish (Spain)": "ES-ES",
+    "Spanish (LatAm)": "ES-LATAM",
     French: "FR",
     German: "DE",
     Italian: "IT",
-    Portuguese: "PT",
-    "Brazilian Portuguese": "PT-BR",
     "Portuguese (Portugal)": "PT-PT",
+    "Portuguese (Brazil)": "PT-BR",
     Japanese: "JA",
     Korean: "KO",
     "Chinese (Simplified)": "ZH",
@@ -93,16 +90,13 @@ function languageCode(lang: string): string {
 
 const translationCache = new Map<string, string>();
 const COMMON_TARGET_LANGUAGES = [
-  "Spanish",
-  "Mexican Spanish",
-  "Latin American Spanish",
   "Spanish (Spain)",
+  "Spanish (LatAm)",
   "French",
   "German",
   "Italian",
-  "Portuguese",
-  "Brazilian Portuguese",
   "Portuguese (Portugal)",
+  "Portuguese (Brazil)",
   "Japanese",
   "Korean",
   "Chinese (Simplified)",
