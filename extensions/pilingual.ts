@@ -2,23 +2,21 @@
  * Pilingual Extension — side-by-side translation rendering
  *
  * Intercepts every assistant response, translates the text content
- * via the OpenCode GO subscription (OpenAI-compatible endpoint), and renders
+ * via a pi-registered OpenAI-compatible provider, and renders
  * both versions in a side-by-side layout inside the TUI.
  *
  * Environment variables:
- *   PILINGUAL_ADAPTER    – API adapter (default: openai-compatible)
- *   PILINGUAL_PROVIDER   – pi provider ID to use, or manual fallback provider name
- *   PILINGUAL_API_KEY    – Manual fallback API key
- *   PILINGUAL_BASE_URL   – Manual fallback base URL (default: https://opencode.ai/zen/go/v1)
- *   PILINGUAL_MODEL      – pi model ID or manual fallback model ID (default: deepseek-v4-flash)
+ *   PILINGUAL_PROVIDER        – Initial pi provider ID (overridden by /pilingual provider)
+ *   PILINGUAL_MODEL           – Initial pi model ID (overridden by /pilingual model)
  *   PILINGUAL_TARGET_LANGUAGE – Target language (default: Spanish)
- *   PILINGUAL_MAX_CHARS  – Skip translation above this length; 0 means no limit (default: 8000)
+ *   PILINGUAL_MAX_CHARS       – Skip translation above this length; 0 means no limit (default: 8000)
  *
  * Commands:
  *   /pilingual on|off|status|provider|model|language
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import {
   Box,
   Container,
@@ -28,13 +26,12 @@ import {
   visibleWidth,
 } from "@earendil-works/pi-tui";
 
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+
 // ─── Configuration ───────────────────────────────────────────────────────────
 
-const PILINGUAL_ADAPTER =
-  process.env.PILINGUAL_ADAPTER ?? "openai-compatible";
 const PILINGUAL_PROVIDER = process.env.PILINGUAL_PROVIDER;
-const PILINGUAL_BASE_URL =
-  process.env.PILINGUAL_BASE_URL ?? "https://opencode.ai/zen/go/v1";
 const PILINGUAL_MODEL =
   process.env.PILINGUAL_MODEL ?? "deepseek-v4-flash";
 const PILINGUAL_TARGET_LANGUAGE =
@@ -44,16 +41,43 @@ const PILINGUAL_MAX_CHARS = parseInt(
   10,
 );
 
-function getApiKey(): string | undefined {
-  return process.env.PILINGUAL_API_KEY;
-}
-
 type PilingualState = {
   enabled: boolean;
   provider?: string;
   model?: string;
   targetLanguage: string;
 };
+
+// ─── File-based persistence ──────────────────────────────────────────────────
+
+const CONFIG_FILE = join(getAgentDir(), "pilingual.json");
+
+function loadStateFromFile(): Partial<PilingualState> {
+  try {
+    const raw = readFileSync(CONFIG_FILE, "utf-8");
+    return JSON.parse(raw) as Partial<PilingualState>;
+  } catch {
+    return {};
+  }
+}
+
+function saveStateToFile(state: PilingualState): void {
+  try {
+    mkdirSync(getAgentDir(), { recursive: true });
+    writeFileSync(CONFIG_FILE, JSON.stringify(state, null, 2) + "\n", "utf-8");
+  } catch {
+    // Best-effort — don't crash the extension if write fails.
+  }
+}
+
+function languageCode(lang: string): string {
+  const map: Record<string, string> = {
+    Spanish: "ES", French: "FR", German: "DE", Italian: "IT",
+    Portuguese: "PT", Japanese: "JA", Korean: "KO",
+    "Chinese (Simplified)": "ZH",
+  };
+  return map[lang] ?? lang.slice(0, 2).toUpperCase();
+}
 
 // ─── Translation cache (session-scoped) ──────────────────────────────────────
 
@@ -193,8 +217,8 @@ async function selectTargetLanguage(
   return customLanguage?.trim() || undefined;
 }
 
-function saveState(pi: ExtensionAPI, state: PilingualState): void {
-  pi.appendEntry("pilingual-state", { ...state });
+function saveState(state: PilingualState): void {
+  saveStateToFile(state);
 }
 
 function getUsageText(): string {
@@ -251,7 +275,7 @@ function getRendererMarkdownTheme(theme: {
   };
 }
 
-// ─── Translation via OpenAI-compatible chat endpoint ─────────────────────────
+// ─── Translation via pi-registered OpenAI-compatible provider ────────────────
 
 async function translateText(
   english: string,
@@ -262,43 +286,30 @@ async function translateText(
     return null;
   }
 
-  if (PILINGUAL_ADAPTER !== "openai-compatible") return null;
-
-  const provider = state.provider ?? PILINGUAL_PROVIDER;
-  const modelId = state.model ?? PILINGUAL_MODEL;
+  const provider = state.provider;
+  const modelId = state.model;
   const registryModel = findTranslationModel(ctx, provider, modelId);
 
-  let baseUrl: string;
-  let apiKey: string | undefined;
-  let headers: Record<string, string> | undefined;
+  if (!registryModel) return null;
 
-  if (registryModel) {
-    const auth = await ctx.modelRegistry.getApiKeyAndHeaders(registryModel);
-    if (!auth.ok) return null;
-    baseUrl = registryModel.baseUrl;
-    apiKey = auth.apiKey;
-    headers = auth.headers;
-  } else {
-    apiKey = getApiKey();
-    if (!apiKey) return null;
-    baseUrl = PILINGUAL_BASE_URL;
-  }
+  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(registryModel);
+  if (!auth.ok) return null;
 
   const key = cacheKey(
-    `${provider ?? "manual"}/${modelId}/${state.targetLanguage}:${english}`,
+    `${provider}/${modelId}/${state.targetLanguage}:${english}`,
   );
   const cached = translationCache.get(key);
   if (cached) return cached;
 
   try {
     const response = await fetch(
-      `${baseUrl}/chat/completions`,
+      `${registryModel.baseUrl}/chat/completions`,
       {
         method: "POST",
         headers: {
-          ...headers,
+          ...auth.headers,
           "Content-Type": "application/json",
-          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+          ...(auth.apiKey ? { Authorization: `Bearer ${auth.apiKey}` } : {}),
         },
         body: JSON.stringify({
           model: modelId,
@@ -336,48 +347,30 @@ async function translateText(
 // ─── Extension entry point ───────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
+  // ── Load persisted state from file, with env-var defaults ────────────────
+
+  const saved = loadStateFromFile();
   const state: PilingualState = {
-    enabled: true,
-    provider: PILINGUAL_PROVIDER,
-    model: PILINGUAL_PROVIDER ? PILINGUAL_MODEL : undefined,
-    targetLanguage: PILINGUAL_TARGET_LANGUAGE,
+    enabled: saved.enabled ?? true,
+    provider: saved.provider ?? PILINGUAL_PROVIDER,
+    model: saved.model ?? (saved.provider ?? PILINGUAL_PROVIDER ? PILINGUAL_MODEL : undefined),
+    targetLanguage: saved.targetLanguage ?? PILINGUAL_TARGET_LANGUAGE,
   };
   void loadPiMarkdownTheme();
 
-  // ── Restore state from session ──────────────────────────────────────────
+  // ── Update status bar on session start ───────────────────────────────────
 
   pi.on("session_start", async (_event, ctx) => {
-    for (const entry of ctx.sessionManager.getEntries()) {
-      if (
-        entry.type === "custom" &&
-        entry.customType === "pilingual-state"
-      ) {
-        const data = entry.data as { enabled?: boolean } | undefined;
-        if (data && typeof data.enabled === "boolean") {
-          state.enabled = data.enabled;
-        }
-        if (data && typeof (data as PilingualState).provider === "string") {
-          state.provider = (data as PilingualState).provider;
-        }
-        if (data && typeof (data as PilingualState).model === "string") {
-          state.model = (data as PilingualState).model;
-        }
-        if (data && typeof (data as PilingualState).targetLanguage === "string") {
-          state.targetLanguage = (data as PilingualState).targetLanguage;
-        }
-      }
-    }
-
     translationCache.clear();
 
-    const status = state.enabled ? "on" : "off";
+    const langCode = languageCode(state.targetLanguage);
     ctx.ui.setStatus(
       "pilingual",
       state.enabled
-        ? ctx.ui.theme.fg("success", "🌐 EN→ES")
+        ? ctx.ui.theme.fg("success", `🌐 EN→${langCode}`)
         : ctx.ui.theme.fg("dim", "🌐 off"),
     );
-    ctx.ui.notify(`Pilingual: ${status}`, "info");
+    ctx.ui.notify(`Pilingual: ${state.enabled ? "on" : "off"}`, "info");
   });
 
   // ── Intercept assistant messages at message_end ─────────────────────────
@@ -567,15 +560,15 @@ export default function (pi: ExtensionAPI) {
 
       if (arg === "on") {
         state.enabled = true;
-        saveState(pi, state);
+        saveState(state);
         ctx.ui.setStatus(
           "pilingual",
-          ctx.ui.theme.fg("success", "🌐 EN→ES"),
+          ctx.ui.theme.fg("success", `🌐 EN→${languageCode(state.targetLanguage)}`),
         );
         ctx.ui.notify("Pilingual mode: ON", "info");
       } else if (arg === "off") {
         state.enabled = false;
-        saveState(pi, state);
+        saveState(state);
         ctx.ui.setStatus(
           "pilingual",
           ctx.ui.theme.fg("dim", "🌐 off"),
@@ -595,7 +588,7 @@ export default function (pi: ExtensionAPI) {
             state.model = providerModels.some((model) => model.id === state.model)
               ? state.model
               : providerModels[0]?.id;
-            saveState(pi, state);
+            saveState(state);
             translationCache.clear();
             ctx.ui.notify(
               `Pilingual provider: ${state.provider}\nPilingual model: ${state.model}`,
@@ -628,7 +621,7 @@ export default function (pi: ExtensionAPI) {
         state.model = providerModels.some((model) => model.id === state.model)
           ? state.model
           : providerModels[0].id;
-        saveState(pi, state);
+        saveState(state);
         translationCache.clear();
         ctx.ui.notify(
           `Pilingual provider: ${state.provider}\nPilingual model: ${state.model}`,
@@ -645,7 +638,7 @@ export default function (pi: ExtensionAPI) {
 
             state.provider = selectedModel.provider;
             state.model = selectedModel.id;
-            saveState(pi, state);
+            saveState(state);
             translationCache.clear();
             ctx.ui.notify(
               `Pilingual model: ${formatModelId(state.provider, state.model)}`,
@@ -685,7 +678,7 @@ export default function (pi: ExtensionAPI) {
 
         state.provider = model.provider;
         state.model = model.id;
-        saveState(pi, state);
+        saveState(state);
         translationCache.clear();
         ctx.ui.notify(
           `Pilingual model: ${formatModelId(state.provider, state.model)}`,
@@ -715,25 +708,32 @@ export default function (pi: ExtensionAPI) {
           }
         }
 
-        state.targetLanguage = language;
-        saveState(pi, state);
+        state.targetLanguage = language.replace(
+          /\b\w/g,
+          (c) => c.toUpperCase(),
+        );
+        saveState(state);
         translationCache.clear();
+        ctx.ui.setStatus(
+          "pilingual",
+          state.enabled
+            ? ctx.ui.theme.fg("success", `🌐 EN→${languageCode(state.targetLanguage)}`)
+            : ctx.ui.theme.fg("dim", "🌐 off"),
+        );
         ctx.ui.notify(`Pilingual target language: ${state.targetLanguage}`, "info");
       } else if (arg === "status" || arg === "") {
-        const provider = state.provider ?? PILINGUAL_PROVIDER ?? "manual";
-        const modelId = state.model ?? PILINGUAL_MODEL ?? "none";
+        const provider = state.provider ?? "none";
+        const modelId = state.model ?? "none";
         const registryModel = findTranslationModel(ctx, state.provider, state.model);
-        const baseUrl = registryModel?.baseUrl ?? PILINGUAL_BASE_URL;
         const hasAuth = registryModel
           ? (await ctx.modelRegistry.getApiKeyAndHeaders(registryModel)).ok
-          : !!getApiKey();
+          : false;
 
         ctx.ui.notify(
           `Pilingual: ${state.enabled ? "ON" : "OFF"}\n` +
-            `Adapter: ${PILINGUAL_ADAPTER}\n` +
             `Target language: ${state.targetLanguage}\n` +
             `Model: ${formatModelId(provider, modelId)}\n` +
-            `Endpoint: ${baseUrl}\n` +
+            (registryModel ? `Endpoint: ${registryModel.baseUrl}\n` : "") +
             `Auth: ${hasAuth ? "ok" : "missing"}\n` +
             `Max chars: ${PILINGUAL_MAX_CHARS}\n` +
             `Cache entries: ${translationCache.size}` +
