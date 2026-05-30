@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "English to Spanish side-by-side rendering extension for pi.",
+  "description": "Side-by-side translation rendering extension for pi.",
   "scripts": {
     "typecheck": "tsc --noEmit"
   },

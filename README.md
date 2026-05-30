@@ -1,6 +1,6 @@
 # Pilingual
 
-Pilingual is a pi extension that translates assistant responses from English to Spanish and renders the original and translation side by side in the TUI.
+Pilingual is a pi extension that translates assistant responses and renders the original and translation side by side in the TUI. It defaults to English-to-Spanish, and the target language can be changed.
 
 ## Install
 
@@ -26,6 +26,7 @@ Then restart pi or run:
 ## Usage
 
 ```text
+/pilingual
 /pilingual on
 /pilingual off
 /pilingual status
@@ -35,7 +36,12 @@ Then restart pi or run:
 /pilingual model
 /pilingual model <provider/model>
 /pilingual model <number>
+/pilingual language
+/pilingual language <language>
+/pilingual language <number>
 ```
+
+`/pilingual` with no arguments prints current status plus usage.
 
 ## Configuration
 
@@ -50,6 +56,9 @@ configured through pi can select one interactively:
 /pilingual model
 /pilingual model openai/gpt-4.1-mini
 /pilingual model 2
+/pilingual language
+/pilingual language French
+/pilingual language 1
 ```
 
 Only available `openai-completions` models are offered, because that is the
@@ -65,11 +74,16 @@ export PILINGUAL_ADAPTER=openai-compatible
 export PILINGUAL_API_KEY=...
 export PILINGUAL_BASE_URL=https://opencode.ai/zen/go/v1
 export PILINGUAL_MODEL=deepseek-v4-flash
+export PILINGUAL_TARGET_LANGUAGE=Spanish
 export PILINGUAL_MAX_CHARS=8000
 ```
 
 Optionally set `PILINGUAL_PROVIDER=<pi-provider-id>` and `PILINGUAL_MODEL=<model-id>` to pick a pi registry model at startup.
 
 Set `PILINGUAL_MAX_CHARS=0` to disable the length limit.
+
+The target language defaults to Spanish. Use `/pilingual language` to change it
+for the current session, or set `PILINGUAL_TARGET_LANGUAGE` as the startup
+default.
 
 Do not commit API keys.
