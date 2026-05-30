@@ -43,4 +43,6 @@ export PILINGUAL_MODEL=deepseek-v4-flash
 export PILINGUAL_MAX_CHARS=8000
 ```
 
+Set `PILINGUAL_MAX_CHARS=0` to disable the length limit.
+
 Do not commit API keys.

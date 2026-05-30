@@ -10,7 +10,7 @@
  *   PILINGUAL_API_KEY    – API key for the configured provider
  *   PILINGUAL_BASE_URL   – Base URL (default: https://opencode.ai/zen/go/v1)
  *   PILINGUAL_MODEL      – Model ID (default: deepseek-v4-flash)
- *   PILINGUAL_MAX_CHARS  – Skip translation if English exceeds this (default: 8000)
+ *   PILINGUAL_MAX_CHARS  – Skip translation above this length; 0 means no limit (default: 8000)
  *
  * Commands:
  *   /pilingual on|off|status
@@ -115,7 +115,9 @@ async function translateToSpanish(
   const apiKey = getApiKey();
   if (!apiKey) return null;
   if (PILINGUAL_PROVIDER !== "openai-compatible") return null;
-  if (english.length > PILINGUAL_MAX_CHARS) return null;
+  if (PILINGUAL_MAX_CHARS > 0 && english.length > PILINGUAL_MAX_CHARS) {
+    return null;
+  }
 
   const key = cacheKey(english);
   const cached = translationCache.get(key);
